@@ -78,16 +78,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Feature Graph Networks')
     parser.add_argument("--device", type=str, default='cuda:0', help="cuda or cpu")
     parser.add_argument("--dataset", type=str, default='tartanair', help="TartanAir")
-    parser.add_argument("--train-root", type=str, default='/data/datasets/tartanair', help="data location")
-    parser.add_argument("--test-root", type=str, default='/data/datasets/tartanair_test')
-    parser.add_argument("--train-catalog", type=str, default='./.cache/tartanair-sequences.pbz2', help='processed training set')
-    parser.add_argument("--test-catalog", type=str, default='./.cache/tartanair-test-sequences.pbz2', help='processed test set')
-    parser.add_argument("--log-dir", type=str, default=None, help="log dir")
+    parser.add_argument("--data-root", type=str, default='/data/datasets/tartanair', help="data location")
+    parser.add_argument("--dataset-catalog", type=str, default='./.cache/tartanair-sequences.pbz2', help='dataset bookkeeping cache')
+    parser.add_argument("--log-dir", type=str, default=None, help="TensorBoard log dir")
+    parser.add_argument("--method", type=str, choices=["FGN", "GAT"], default="FGN", help="Method to train and evaluate")
     parser.add_argument("--load", type=str, default=None, help="load pretrained model")
-    parser.add_argument("--save", type=str, default=None, help="model file to save")
+    parser.add_argument("--save", type=str, default='./saved_models/featurenet.pth', help="model file to save")
     parser.add_argument("--feat-dim", type=int, default=256, help="feature dimension")
-    parser.add_argument("--feat-num", type=int, default=500, help="feature number")
-    parser.add_argument('--scale', type=float, default=1, help='image resize')
+    parser.add_argument("--feat-num", type=int, default=300, help="feature number")
+    parser.add_argument('--scale', type=float, default=0.5, help='image resize')
     parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
     parser.add_argument("--min-lr", type=float, default=1e-6, help="learning rate")
     parser.add_argument("--factor", type=float, default=0.1, help="factor of lr")
@@ -102,27 +101,24 @@ if __name__ == "__main__":
     parser.add_argument("--viz_freq", type=int, default=1, help='Visualize every * iteration(s)')
     parser.add_argument("--eval-split-seed", type=int, default=42, help='Seed for splitting the dataset')
     parser.add_argument("--eval-percentage", type=float, default=0.2, help='Percentage of sequences for eval')
-    parser.add_argument("--eval-freq", type=int, default=10000, help='Evaluate every * steps')
-    parser.add_argument("--eval-topk", type=int, default=200, help='Only inspect top * matches')
-    parser.add_argument("--eval-back", type=int, nargs='+', default=[1])
+    parser.add_argument("--eval-freq", type=int, default=5000, help='Evaluate every * steps')
+    parser.add_argument("--eval-topk", type=int, default=150, help='Only inspect top * matches')
+    parser.add_argument("--eval-back", type=int, nargs='+', default=[1], help='Evaluate by matching each frame with * frames ago')
     args = parser.parse_args(); print(args)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
 
-    train_data, eval_data = TartanAir(args.train_root, args.scale, catalog_path=args.train_catalog) \
+    train_data, test_data = TartanAir(args.data_root, args.scale, catalog_path=args.dataset_catalog) \
         .rand_split([1 - args.eval_percentage, args.eval_percentage], args.eval_split_seed)
-    eval_data.augment = AirAugment(args.scale, resize_only=True)
-    test_data = TartanAirTest(args.test_root, args.scale, catalog_path=args.test_catalog)
+    test_data.augment = AirAugment(args.scale, resize_only=True)
 
     train_sampler = AirSampler(train_data, args.batch_size, shuffle=True)
-    eval_sampler = AirSampler(eval_data, args.batch_size, shuffle=False, overlap=False)
-    test_sampler = AirSampler(test_data, args.batch_size, shuffle=False)
+    test_sampler = AirSampler(test_data, args.batch_size, shuffle=False, overlap=False)
 
     train_loader = DataLoader(train_data, batch_sampler=train_sampler, pin_memory=True, num_workers=args.num_workers)
-    eval_loader = DataLoader(eval_data, batch_sampler=eval_sampler, pin_memory=True, num_workers=args.num_workers)
-    test_loader = DataLoader(test_data, batch_sampler=test_sampler, pin_memory=True, num_workers=args.num_workers)
+    eval_loader = DataLoader(test_data, batch_sampler=test_sampler, pin_memory=True, num_workers=args.num_workers)
 
     writer = None
     if args.log_dir is not None:
@@ -135,7 +131,7 @@ if __name__ == "__main__":
 
     step_counter = GlobalStepCounter(initial_step=1)
     criterion = FeatureNetLoss(writer=writer, viz_start=args.viz_start, viz_freq=args.viz_freq, counter=step_counter)
-    net = FeatureNet(args.feat_dim, args.feat_num).to(args.device) if args.load is None else torch.load(args.load, args.device)
+    net = FeatureNet(args.feat_dim, args.feat_num, graph=args.method).to(args.device) if args.load is None else torch.load(args.load, args.device)
     if not isinstance(net, nn.DataParallel):
         net = nn.DataParallel(net)
     optimizer = optim.RMSprop(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.w_decay)

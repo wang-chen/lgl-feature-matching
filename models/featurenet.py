@@ -149,7 +149,7 @@ class DescriptorHead(nn.Module):
 
 
 class FeatureNet(models.VGG):
-    def __init__(self, feat_dim=256, feat_num=500, sample_pass=1):
+    def __init__(self, feat_dim=256, feat_num=500, sample_pass=1, graph="FGN"):
         super().__init__(models.vgg13().features)
         self.feat_dim, self.feat_num, self.sample_pass = feat_dim, feat_num, sample_pass
         # Only adopt the first 15 layers of pre-trained vgg13. Feature Map: (512, H/8, W/8)
@@ -159,14 +159,18 @@ class FeatureNet(models.VGG):
 
         self.scores = ScoreHead(8)
         self.descriptors = DescriptorHead(feat_dim, feat_num, sample_pass)
-        self.graph = nn.Sequential(
-            GraphAttn(self.feat_dim, self.feat_dim),
-            nn.BatchNorm1d(feat_num), nn.LeakyReLU(0.2),
-            GraphAttn(self.feat_dim, self.feat_dim))
-        # self.graph = nn.Sequential(
-        #     FGN(self.feat_dim, self.feat_num),
-        #     nn.BatchNorm1d(feat_num), nn.LeakyReLU(0.2),
-        #     FGN(self.feat_dim, self.feat_num))
+        if graph == "GAT":
+            self.graph = nn.Sequential(
+                GraphAttn(self.feat_dim, self.feat_dim),
+                nn.BatchNorm1d(feat_num), nn.LeakyReLU(0.2),
+                GraphAttn(self.feat_dim, self.feat_dim))
+        elif graph == "FGN":
+            self.graph = nn.Sequential(
+                FGN(self.feat_dim, self.feat_num),
+                nn.BatchNorm1d(feat_num), nn.LeakyReLU(0.2),
+                FGN(self.feat_dim, self.feat_num))
+        else:
+            raise ValueError(f"Unknown graph network structure: {graph}")
         self.nms = nms.NonMaximaSuppression2d((5, 5))
 
     def forward(self, inputs):
